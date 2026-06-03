@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="zymiq favicon">
+  
+  <rect width="32" height="32" rx="6" fill="#8D57C0"></rect>
+  <g stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <polyline points="8,9 13,11 16,9 19,11 24,9"></polyline>
+    <polyline points="24,9 19,15 16,16 13,17 8,23"></polyline>
+    <polyline points="8,23 13,21 16,23 19,21 24,23"></polyline>
+  </g>
+  <g fill="#FFFFFF">
+    <circle cx="16" cy="9" r="1.6"></circle>
+    <circle cx="16" cy="16" r="1.6"></circle>
+    <circle cx="16" cy="23" r="1.6"></circle>
+    <circle cx="24" cy="9" r="1.6"></circle>
+    <circle cx="8" cy="23" r="1.6"></circle>
+  </g>
+</svg>
