@@ -1,0 +1,109 @@
+# Deploys the marketing site to https://zymiq.io/lims/ — on a tag, and only
+# on a tag.
+#
+#   git tag mkt-v2026.09.27.1 && git push origin mkt-v2026.09.27.1
+#
+# ## What this is not
+#
+# CI. Checks run locally before the tag (`pnpm ci:local`), by agreement: this
+# workflow builds what it ships and asserts the one property that decides
+# whether the shipped thing works, and that is all.
+#
+# ## Where it goes
+#
+# A static export into `s3://$MARKETING_BUCKET/lims/`. CloudFront distribution
+# `$DISTRIBUTION_ID` — the same one that serves the client portal on zymiq.io
+# — routes `/lims*` to that bucket, through the `zymiq-lims-index` CloudFront
+# Function (directory → index.html, slash-less → 301). Everything else on the
+# hostname is the portal. Nothing here touches the portal's origin.
+#
+# ## Why the role is so narrow
+#
+# This repository is public. The role trusts `mkt-v*` tag refs only — which
+# only a collaborator can push, so a fork cannot assume it — and can write the
+# `lims/` prefix of one bucket and invalidate one distribution. It cannot read
+# the portal, deploy the portal, or touch any other object.
+name: deploy
+
+on:
+  push:
+    tags: ['mkt-v*']
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-marketing
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      BUCKET: ${{ vars.MARKETING_BUCKET }}
+      DIST: ${{ vars.DISTRIBUTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc, cache: pnpm }
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the static export
+        run: pnpm build
+
+      # The one assertion worth making here. A URL that escapes /lims is not a
+      # 404 — CloudFront hands it to the portal, which answers with its own
+      # favicon, page or login redirect, and the site looks subtly wrong
+      # instead of broken. See scripts/check-export.sh.
+      - name: Everything is under /lims
+        run: pnpm check:export
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_DEPLOY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Hashed chunks first, and never deleted: they are content-addressed, so
+      # arriving early is harmless, and a page cached from the PREVIOUS release
+      # (five minutes, below) must still find the chunks it names.
+      - name: Upload hashed assets (immutable)
+        run: |
+          set -euo pipefail
+          aws s3 sync out/_next/static/ "s3://$BUCKET/lims/_next/static/" \
+            --cache-control "public,max-age=31536000,immutable" --only-show-errors
+
+      # Then the pages, with --delete so a page removed from the site stops
+      # being served. Excluding _next/static keeps the sweep off the chunks.
+      - name: Upload pages (5 min)
+        run: |
+          set -euo pipefail
+          aws s3 sync out/ "s3://$BUCKET/lims/" --exclude "_next/static/*" --delete \
+            --cache-control "public,max-age=300" --only-show-errors
+
+      - name: Invalidate /lims
+        run: |
+          set -euo pipefail
+          ID=$(aws cloudfront create-invalidation --distribution-id "$DIST" \
+            --paths '/lims*' --query Invalidation.Id --output text)
+          echo "invalidation $ID"
+          aws cloudfront wait invalidation-completed --distribution-id "$DIST" --id "$ID"
+
+      # Through the real hostname, the path a visitor takes. Fetched to files
+      # and grepped, never `curl | grep -q`: under pipefail a MATCH makes curl
+      # die of SIGPIPE and the step fails on success (it happened in the
+      # client's pipeline and was misread as a cold start).
+      - name: Smoke — the live site
+        run: |
+          set -euo pipefail
+          curl -sS -o /tmp/page.html -w '%{http_code}\n' https://zymiq.io/lims/ > /tmp/code
+          [ "$(cat /tmp/code)" = "200" ] || { echo "::error::/lims/ answered $(cat /tmp/code)"; exit 1; }
+          grep -q '<link rel="canonical" href="https://zymiq.io/lims/"' /tmp/page.html \
+            || { echo "::error::/lims/ is not serving the marketing site"; exit 1; }
+          curl -sS -o /dev/null -D /tmp/h https://zymiq.io/lims
+          grep -qi '^location: /lims/' /tmp/h \
+            || { echo "::error::bare /lims does not redirect to /lims/"; exit 1; }
+          echo "live: /lims/ serves the site, /lims redirects to it"
