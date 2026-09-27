@@ -1,5 +1,6 @@
 import { Logo, LogoMark } from "./components/LogoMark";
 import { SiteInteractions } from "./components/SiteInteractions";
+import { LIMS_SIGN_IN_URL } from "../site.config";
 
 const arrowIcon = (
   <svg
@@ -116,7 +117,7 @@ export default function Home() {
           </nav>
 
           <div className="nav-cta-group">
-            <a className="nav-signin" href="#">
+            <a className="nav-signin" href={LIMS_SIGN_IN_URL}>
               Sign in
             </a>
             <span className="nav-divider" />
@@ -189,7 +190,7 @@ export default function Home() {
           <a className="drawer-link" href="#blog">
             Blog
           </a>
-          <a className="drawer-link" href="#">
+          <a className="drawer-link" href={LIMS_SIGN_IN_URL}>
             Sign in
           </a>
         </div>
